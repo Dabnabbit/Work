@@ -1,0 +1,4 @@
+hostname:handlerGeneric
+ps -ef:handlerProcess
+netstat -tun:handlerNetstat
+ip a:handlerGeneric

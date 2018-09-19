@@ -1,0 +1,7 @@
+dockervm
+elasticnodes-0
+elasticnodes-1
+elasticnodes-2
+elasticnodes-3
+elasticnodes-4
+elasticnodes-5

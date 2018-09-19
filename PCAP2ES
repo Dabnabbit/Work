@@ -1,0 +1,99 @@
+#!/bin/bash
+
+# Delete current packets- index
+curl -XDELETE "http://localhost:9200/packets-*"
+
+# Create and send over a template to exclude most garbage data from aggregation and only include named fields
+curl -XPUT "http://localhost:9200/_template/packets" -H 'Content-Type: application/json' -d'
+{
+  "template": "packets-*",
+  "mappings": {
+    "pcap_file": {
+      "dynamic": "false",
+	    "_all": {
+        "enabled": "false"
+      },
+      "properties": {
+        "timestamp": {
+          "format": "yyyy/MM/dd HH:mm:ss||yyyy/MM/dd||epoch_millis",
+          "type": "date",
+          "include_in_all": "false"
+        },
+        "layers": {
+          "properties": {
+            "eth": {
+              "properties": {
+                "eth_eth_src": {
+                  "type": "keyword",
+                  "include_in_all": "false"
+                },
+                "eth_eth_dst": {
+                  "type": "keyword",
+                  "include_in_all": "false"
+                }
+              }
+            },
+            "frame": {
+              "properties": {
+                "frame_frame_len": {
+                  "type": "long",
+                  "include_in_all": "false"
+                },
+                "frame_frame_protocols": {
+                  "type": "keyword",
+                  "include_in_all": "false"
+                }
+              }
+            },
+            "ip": {
+              "properties": {
+                "ip_ip_src": {
+                  "type": "ip",
+                  "include_in_all": "false"
+                },
+                "ip_ip_dst": {
+                  "type": "ip",
+                  "include_in_all": "false"
+                }
+              }
+            },
+            "tcp": {
+              "properties": {
+                "tcp_tcp_srcport": {
+                  "type": "integer",
+                  "include_in_all": "false"
+                },
+                "tcp_tcp_dstport": {
+                  "type": "integer",
+                  "include_in_all": "false"
+                }
+              }
+            },
+            "udp": {
+              "properties": {
+                "udp_udp_srcport": {
+                  "type": "integer",
+                  "include_in_all": "false"
+                },
+                "udp_udp_dstport": {
+                  "type": "integer",
+                  "include_in_all": "false"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}'
+
+# Unpackage a packet file from the external HD (change this if this script is gonna be used for a while)
+tar -xz --directory=/tmp/. -f /run/media/assessor/My\ Passport/PCAP/Malware-Traffic-Analysis.net.tar.gz
+
+# Run TShark against one of the unpacked pcap files and save as an ElasticSearch formatted json file in /tmp
+/usr/local/bin/tshark -T ek -r /tmp/Malware-Traffic-Analysis.net/2017-05-18/capture.pcap > /tmp/packets.json
+
+# CURL the json file over to Elastic
+curl -s -H "Content-Type: application/x-ndjson" -XPOST "http://10.101.32.2:9200/_bulk" --data-binary "@/tmp/packets.json"
+
