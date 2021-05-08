@@ -1,0 +1,339 @@
+var roster = [[[]]];
+var prefixes = ["A1C","SrA","SSgt","TSgt","MSgt","SMSgt","Capt","Maj","Lt. Col","Lt Col","Lt","Col","Mrs","Ms","Mr"]
+
+var schedCols = [];
+schedCols["Rm"] = 0;
+schedCols["Start"] = 1;
+schedCols["End"] = 2;
+schedCols["Hrs"] = 3;
+schedCols["Lesson #"] = 4;
+schedCols["Lesson Title"] = 5;
+schedCols["Primary"] = 7;
+schedCols["Eval"] = 8;
+schedCols["Support / Eval"] = 11;
+schedCols["Secondary"] = 12;
+
+var makeCalendar = [];
+makeCalendar["BENTZ"] = "urt7sg221ppg891h827hcd74a8@group.calendar.google.com"
+makeCalendar["OESTMANN"] = "calenderIDhere@group.calendar.google.com"
+makeCalendar["STEFANIK"] = "test@group.calendar.google.com"
+makeCalendar["BROOKS"] = "brooks@group.calendar.google.com"
+
+var sched_TimeZone = "GMT-0500"; //-TODO: Something weird with daylight savings here...
+var sched_Seed = Math.random(); //- Seed used to identify unique "runs" of script to deconflict
+var oldEventWindow = 1; //-Window of old event days
+
+//-Get active spreadsheet
+var spreadsheet = SpreadsheetApp.getActive();
+var sheets = spreadsheet.getSheets();
+var dataSheet = spreadsheet.getSheetByName("Data");
+var dataData = dataSheet.getDataRange().getDisplayValues();
+var date_start = dataData[1][0];
+var date_end = dataData[1][1];
+var filter_course = dataData[1][2].trim();
+
+function Schedule_ProcessHours()
+{
+  sched_Seed = Math.random();
+  Schedule_CountHours();
+  Schedule_GenerateSheet();
+}
+
+function Schedule_ProcessCalendar()
+{
+  sched_Seed = Math.random();
+  Schedule_CountHours();
+  Schedule_GenerateCalendar();
+}
+
+function Schedule_CountHours()
+{
+  roster.pop();
+  Logger.log("Detecting Date Range: " + new Date(date_start + " " + sched_TimeZone).toString() + " - " + new Date(date_end + " " + sched_TimeZone).toString());
+
+  for (var x = 0; x < sheets.length; x++) {
+    var sheet = sheets[x];
+    var sheetName = sheet.getSheetName();
+    var course = sheetName.split("_")[0]
+    var data = sheet.getDataRange().getDisplayValues();
+    var sheetDateStart = Schedule_GetDateStart(data);
+    var sheetDateEnd = Schedule_GetDateEnd(data);
+
+    if (sheetName == dataSheet.getSheetName()) {
+      Logger.log("Skipping Data Sheet...")
+      continue;
+    }
+    else if (filter_course != "" && filter_course.indexOf(course) == -1) {
+      Logger.log("Skipping " + sheetName + " due to Filter...")
+      continue;
+    }
+    else if (new Date(sheetDateStart + " " + sched_TimeZone) > new Date(date_end + " " + sched_TimeZone) || new Date(sheetDateEnd + " " + sched_TimeZone) < new Date(date_start + " " + sched_TimeZone)) {
+      Logger.log("Skipping " + sheetName + " due to Time Range...")
+      //Logger.log(new Date(sheetDateStart) + " > " + new Date(date_end) + " || " + new Date(sheetDateEnd) + " < " + new Date(date_start))
+      continue;
+    }
+    //Logger.log("CLASS: " + sheetName + " : " + course);
+    var curDay = 0;
+    var curDate = "1970-01-01";
+    for (var i = 0; i < data.length; i++) {
+      if (data[i][0].toUpperCase().indexOf("DAY:") > -1) {
+        curDay = data[i][1];
+        curDate = data[i][2];
+      }
+      else if(!isNaN(new Date(data[i][0]).getDate())) {
+        //Logger.log("It is a date! " + data[i][0])
+        curDay++;
+        curDate = data[i][0];
+      }
+      if (data[i].length > 7 && data[i][schedCols["Rm"]].toUpperCase().indexOf("CR") > -1 && data[i][schedCols["Primary"]] != "" && data[i][schedCols["Primary"]] != "") {
+        var hours = (new Date(curDate + " " + data[i][schedCols["End"]]) - new Date(curDate + " " + data[i][schedCols["Start"]])) / 1000 / 60 / 60; //-convert to Hours
+        //Logger.log("Day: " + curDay + " || Date: " + curDate + " || " + data[i][5] + " || " + hours + " hrs");
+        var instructors = (data[i][schedCols["Primary"]].toUpperCase()  + ", " + data[i][schedCols["Support / Eval"]].toUpperCase() + ", " + data[i][schedCols["Secondary"]].toUpperCase()).replace("/",",")
+        instructors = instructors.split(",")
+        for (var j in instructors) {
+          //-trim out whitespace and evaluator names
+          instructor = instructors[j].replace(/(Evaluator:).*/gi,"")
+          //-remove any special chars
+          instructor = instructor.replace("*","").trim();
+          if (instructor != "") {
+            //Logger.log(instructors[j] + " | " + instructor)
+            var name = roster[Roster_GetMember(instructor)][0];
+            //Logger.log(makeCalendar[name])
+            if (makeCalendar[name] != undefined && makeCalendar[name] != null) {
+              Roster_AddHours(instructor, new Date(curDate), course, hours, data[i]);
+            }
+            else {
+              Roster_AddHours(instructor, new Date(curDate), course, hours);
+            }
+          }
+        }
+      }
+    }
+  }
+  //Logger.log(roster.toString());
+}
+
+function Schedule_GenerateCalendar()
+{
+  //Schedule_AddCalendar(instrName, milDate, data);
+}
+
+function Schedule_GenerateSheet()
+{
+  dataSheet.clear();
+  if(dataSheet.getFilter()) {
+    dataSheet.getFilter().remove()
+  }
+  dataSheet.getRange(1,1).setValue("FROM:");
+  dataSheet.getRange(1,2).setValue("TO:");
+  dataSheet.getRange(1,3).setValue("FILTER:");
+  dataSheet.getRange(2,1).setValue(date_start);
+  dataSheet.getRange(2,2).setValue(date_end);
+  dataSheet.getRange(2,3).setValue(filter_course);
+  dataSheet.getRange(3,1).setValue('NAME');
+
+  var courses = Schedule_GetCourses();
+  var courseCol = 2;
+  for (var i in courses) {
+    var course = courses[i];
+    dataSheet.getRange(3,courseCol++).setValue(course);
+  }
+  dataSheet.getRange(3,courseCol).setValue('TOTAL');
+  dataSheet.getRange(3,1,3,courseCol).createFilter();
+
+  var rowNum = 4;
+  for (var i in roster) {
+    //var tmpTotalHours = Roster_GetHours(roster[i][0],"2021-3-15","2021-3-15");
+    var instrHrs = Roster_GetHours(roster[i][0], new Date(date_start + " " + sched_TimeZone), new Date(date_end + " " + sched_TimeZone));
+    if (instrHrs && instrHrs['TOTAL'] > 0) {
+      dataSheet.getRange(rowNum,1).setValue(roster[i][0]);
+      for(var course in instrHrs) {
+        for (var x = 2; x <= courseCol; x++) {
+          if(dataSheet.getRange(3,x).getDisplayValue() == course) {
+            dataSheet.getRange(rowNum,x).setValue(instrHrs[course]);
+          }
+        }
+        //Logger.log("Hours for " + i + " '" + roster[i][0] + "': " + course + " || " + instrHrs[course]);
+      }
+      rowNum++;
+    }
+  }
+}
+
+function Schedule_GetCourses()
+{
+  var courses = "";
+  for (var x = 0; x < sheets.length; x++) {
+    var sheetName = sheets[x].getSheetName();
+    if(sheetName == dataSheet.getSheetName()) {
+      continue;
+    }
+    var course = sheetName.split("_")[0];
+    //Logger.log(course + " || " + courses.indexOf(course))
+    if (courses.indexOf(course) == -1 && (filter_course == "" || filter_course.indexOf(course) != -1)) {
+      courses += course + ',';
+    }
+  }
+  courses = courses.slice(0,-1)
+  //Logger.log(courses)
+  return courses.split(",");
+}
+
+function Schedule_GetDateStart(data)
+{
+  var curDate = "1970-01-01";
+  for (var i = 0; i < data.length; i++) {
+    if (data[i][0].toUpperCase().indexOf("DAY:") > -1) {
+      return data[i][2];
+    }
+    else if(!isNaN(new Date(data[i][0]).getDate())) {
+      return data[i][0];
+    }
+  }
+  return false;
+}
+
+function Schedule_GetDateEnd(data)
+{
+  var curDate = "1970-01-01";
+  for (var i = data.length-1; i >= 0; i--) {
+    if (data[i][0].toUpperCase().indexOf("DAY:") > -1) {
+      return data[i][2];
+    }
+    else if (!isNaN(new Date(data[i][0]).getDate())) {
+      return data[i][0];
+    }
+  }
+  return false;
+}
+
+function Schedule_AddCalendar(name, date, data)
+{
+  var workCalendar = CalendarApp.getCalendarById(makeCalendar[name]);
+  if (makeCalendar[name] != undefined && makeCalendar[name] != null && workCalendar != null) {
+    var calRole = "ERROR";
+    var calElse = "";
+    if (data[schedCols["Primary"]].toUpperCase().indexOf(name) > -1) {
+        calRole = "PRIMARY";
+        calElse = "SUPPORT:\n" + data[schedCols["Support / Eval"]] + "\nSECONDARY:\n" + data[schedCols["Secondary"]];
+        if (data[schedCols["Eval"]] != "") {
+          calRole = "EVAL";
+        }
+    }
+    else if (data[schedCols["Support / Eval"]].toUpperCase().indexOf(name) > -1) {
+        calRole = "SUPPORT";
+        calElse = "PRIMARY:\n" + data[schedCols["Primary"]] + "\nSECONDARY:\n" + data[schedCols["Secondary"]];
+    }
+    else if (data[schedCols["Secondary"]].toUpperCase().indexOf(name) > -1) {
+        calRole = "SECONDARY";
+        calElse = "PRIMARY:\n" + data[schedCols["Primary"]] + "\nSUPPORT:\n" + data[schedCols["Support / Eval"]];
+    }
+    else {
+      return;
+    }
+    //var timezone = workCalendar.getTimeZone();
+    //Logger.log(data + " || " + calRole);
+    var calTitle = calRole + ": " + data[schedCols["Lesson #"]];
+    var calTime1 = new Date(date + " " + data[schedCols["Start"]] + "  " + sched_TimeZone);
+    var calTime2 = new Date(date + " " + data[schedCols["End"]] + " " + sched_TimeZone);
+    var calLocat = data[schedCols["Rm"]];
+    var calDescr = data[schedCols["Lesson Title"]] + "\n" + calElse;
+
+    Logger.log(name + "\n" + calTitle + "\n" + calTime1 + "\n" + calTime2 + "\n" + calLocat + "\n" + calDescr)
+
+    //var oldEvents = workCalendar.getEventsForDay(new Date(date));
+    //var oldEvents = workCalendar.getEvents(calTime1, calTime2);
+    var oldEvents = workCalendar.getEvents(new Date(calTime1.getTime() - oldEventWindow*24*60*60*1000), new Date(calTime2.getTime() + oldEventWindow*24*60*60*1000));
+    for (var event of oldEvents) {
+      if(event.getTag("seed") != sched_Seed) {
+        event.deleteEvent();
+        Utilities.sleep(100);
+      }
+    }
+    //-Build out new calendar event per assigned block with date, time, classroom (location), and other details!
+    var workEvent = workCalendar.createEvent(calTitle, calTime1, calTime2,{
+      location: calLocat,
+      description: calDescr
+    })
+    workEvent.setTag("seed", sched_Seed);
+    //Logger.log(workEvent.getTag("seed") + " || " + sched_Seed);
+    Utilities.sleep(100);
+  }
+}
+
+function Roster_AddHours(name, curDate, course, hours, data)
+{
+  var instrNum = Roster_GetMember(name);
+  if (instrNum == false) { return }
+  var instrName = roster[instrNum][0];
+  var curYear = curDate.getYear()+1900;
+  var curMonth = curDate.getMonth()+1;
+  var curDay = curDate.getDate();
+  var milDate = curYear + "-" + curMonth + "-" + curDay;
+  if (roster[instrNum][milDate] == undefined) {
+    roster[instrNum][milDate] = [];
+  }
+  if (roster[instrNum][milDate][course] == undefined) {
+    roster[instrNum][milDate][course] = [];
+  }
+  if (roster[instrNum][milDate][course]["HOURS"] == undefined) {
+    roster[instrNum][milDate][course]["HOURS"] = 0;
+  }
+  roster[instrNum][milDate][course]["HOURS"] += hours;
+
+  if(data != undefined) {
+    //Logger.log("Do extra! " + name + " || " + data)
+    roster[instrNum][milDate][course][roster[instrNum][milDate][course].length] += data
+    //Schedule_AddCalendar(instrName, milDate, data);
+  }
+  //for (var i in roster[instrNum][milDate][course]) {
+  //  Logger.log(i + " || " + roster[instrNum][milDate][course][i])
+  //}
+  //Logger.log(name + " || "+ milDate + " || " + course + " || " + roster[instrNum][milDate][course]["HOURS"])
+}
+
+function Roster_GetHours(name,dateStart,dateEnd)
+{
+  //name = "Mr. Walkowiak"; dateStart = "2021-01-01"; dateEnd = "2021-04-01"
+  var instrNum = Roster_GetMember(name);
+  var instrHrs = [];
+  instrHrs['TOTAL'] = 0
+  if (instrNum == false || dateStart == undefined || dateEnd == undefined) { return }
+  for (var date in roster[instrNum]) {
+    var checkDate = new Date(date + " " + sched_TimeZone);
+    if (date == 0 || date == 1 || checkDate > dateEnd || checkDate < dateStart) { continue; }
+    //Logger.log(date + " || " + roster[instrNum][date] )
+    for (var course in roster[instrNum][date]) {
+      if (instrHrs[course] == undefined) {
+        instrHrs[course] = 0;
+      }
+      var hrs = Number(roster[instrNum][date][course]["HOURS"]);
+      instrHrs[course] += hrs;
+      instrHrs['TOTAL'] += hrs;
+    }
+  }
+  //Logger.log(name + " || " + instrNum + " || " + instrHrs['TOTAL'])
+  return instrHrs;
+}
+
+//-!!TODO: Will have to accommodate adding in some kind of prefix again after normalization due to "TSgt Johnson" vs "Mr. Johnson" etc
+function Roster_GetMember(name)
+{
+  var oldName = name;
+  for (j in prefixes) {
+    var regexFilter = new RegExp("^(" + prefixes[j] + ").","gi");
+    name = name.replace(regexFilter,"");
+  }
+  name = name.trim()
+  if (name == "") { return false }
+  for (i in roster) {
+    if (roster[i][0] != null && roster[i][0].toUpperCase().indexOf(name.toUpperCase()) > -1) {
+      return i;
+    }
+  }
+  var newInstr = [];
+  newInstr[0] = name;
+  roster.push(newInstr);
+  return roster.length-1;
+}
+//Utilities.sleep(100);
